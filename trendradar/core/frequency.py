@@ -150,12 +150,18 @@ def load_frequency_words(
 
         # 处理全局过滤区域
         if current_section == "GLOBAL_FILTER":
-            # 直接添加所有非空行到全局过滤列表
+            # 支持 !词语 语法，也支持直接写词语（向后兼容）
             for line in lines:
-                # 忽略特殊语法前缀，只提取纯文本
-                if line.startswith(("!", "+", "@")):
-                    continue  # 全局过滤区不支持特殊语法
-                if line:
+                # 支持 !前缀 语法（更直观）
+                if line.startswith("!"):
+                    filter_word = line[1:].strip()
+                    if filter_word:
+                        global_filters.append(filter_word)
+                # 忽略其他特殊语法前缀
+                elif line.startswith(("+", "@")):
+                    continue  # 全局过滤区不支持 + 和 @ 语法
+                elif line:
+                    # 直接写词语（向后兼容）
                     global_filters.append(line)
             continue
 
