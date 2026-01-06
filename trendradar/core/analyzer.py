@@ -431,9 +431,68 @@ def count_word_frequency(
         for source_id, title_list in data["titles"].items():
             all_titles.extend(title_list)
 
+        # 跨平台去重：相同标题的新闻合并为一条，保留所有平台信息
+        title_map = {}
+        for title_data in all_titles:
+            title_text = title_data["title"]
+            if title_text not in title_map:
+                # 首次出现，创建合并记录
+                title_map[title_text] = {
+                    "title": title_text,
+                    "source_name": title_data["source_name"],
+                    "sources": [title_data["source_name"]],  # 所有来源平台列表
+                    "first_time": title_data.get("first_time", ""),
+                    "last_time": title_data.get("last_time", ""),
+                    "time_display": title_data.get("time_display", ""),
+                    "count": title_data.get("count", 1),
+                    "ranks": title_data.get("ranks", []),
+                    "rank_threshold": rank_threshold,
+                    "url": title_data.get("url", ""),
+                    "mobileUrl": title_data.get("mobileUrl", ""),
+                    "is_new": title_data.get("is_new", False),
+                }
+            else:
+                # 已存在，合并信息
+                existing = title_map[title_text]
+                # 添加来源平台（去重）
+                if title_data["source_name"] not in existing["sources"]:
+                    existing["sources"].append(title_data["source_name"])
+                # 合并排名（取最佳排名）
+                existing_ranks = set(existing["ranks"]) if existing["ranks"] else set()
+                new_ranks = set(title_data.get("ranks", [])) if title_data.get("ranks", []) else set()
+                merged_ranks = sorted(existing_ranks | new_ranks)
+                existing["ranks"] = merged_ranks
+                # 合并计数
+                existing["count"] += title_data.get("count", 1)
+                # 更新时间范围（取最早和最新）
+                if title_data.get("first_time") and (not existing["first_time"] or title_data["first_time"] < existing["first_time"]):
+                    existing["first_time"] = title_data["first_time"]
+                if title_data.get("last_time") and (not existing["last_time"] or title_data["last_time"] > existing["last_time"]):
+                    existing["last_time"] = title_data["last_time"]
+                # 更新显示时间
+                if existing["first_time"] and existing["last_time"]:
+                    existing["time_display"] = format_time_display(existing["first_time"], existing["last_time"], convert_time_func)
+                # 保留 URL（优先保留非空的）
+                if not existing["url"] and title_data.get("url"):
+                    existing["url"] = title_data.get("url", "")
+                if not existing["mobileUrl"] and title_data.get("mobileUrl"):
+                    existing["mobileUrl"] = title_data.get("mobileUrl", "")
+                # 如果任一来源标记为新增，则整体标记为新增
+                if title_data.get("is_new", False):
+                    existing["is_new"] = True
+
+        # 转换为列表并更新 source_name 显示（多平台时显示平台数量）
+        deduplicated_titles = []
+        for title_data in title_map.values():
+            # 如果多个平台，更新 source_name 显示
+            if len(title_data["sources"]) > 1:
+                # 显示格式：第一个平台名 + "等N个平台"
+                title_data["source_name"] = f"{title_data['sources'][0]}等{len(title_data['sources'])}个平台"
+            deduplicated_titles.append(title_data)
+
         # 按权重排序
         sorted_titles = sorted(
-            all_titles,
+            deduplicated_titles,
             key=lambda x: (
                 -calculate_news_weight(x, rank_threshold, weight_config),
                 min(x["ranks"]) if x["ranks"] else 999,
@@ -453,14 +512,17 @@ def count_word_frequency(
         # 优先使用 display_name，否则使用 group_key
         display_word = group_key_to_display_name.get(group_key) or group_key
 
+        # 统计去重后的实际新闻数量（用于显示和百分比计算）
+        deduplicated_count = len(sorted_titles)
+
         stats.append(
             {
                 "word": display_word,
-                "count": data["count"],
+                "count": deduplicated_count,  # 使用去重后的数量
                 "position": group_key_to_position.get(group_key, 999),
                 "titles": sorted_titles,
                 "percentage": (
-                    round(data["count"] / total_titles * 100, 2)
+                    round(deduplicated_count / total_titles * 100, 2)
                     if total_titles > 0
                     else 0
                 ),
